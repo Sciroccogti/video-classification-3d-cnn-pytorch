@@ -1,22 +1,25 @@
-import os
-import sys
+import glob
 import json
+import os
 import subprocess
+import sys
+
 import numpy as np
 import torch
 from torch import nn
+from tqdm import tqdm
 
-from opts import parse_opts
-from model import generate_model
-from mean import get_mean
 from classify import classify_video
+from mean import get_mean
+from model import generate_model
+from opts import parse_opts
 
-if __name__=="__main__":
+if __name__ == "__main__":
     opt = parse_opts()
     opt.mean = get_mean()
     opt.arch = '{}-{}'.format(opt.model_name, opt.model_depth)
     opt.sample_size = 112
-    opt.sample_duration = 16
+    opt.sample_duration = 5
     opt.n_classes = 400
 
     model = generate_model(opt)
@@ -27,11 +30,6 @@ if __name__=="__main__":
     model.eval()
     if opt.verbose:
         print(model)
-
-    input_files = []
-    with open(opt.input, 'r') as f:
-        for row in f:
-            input_files.append(row[:-1])
 
     class_names = []
     with open('class_names_list') as f:
@@ -46,23 +44,33 @@ if __name__=="__main__":
         subprocess.call('rm -rf tmp', shell=True)
 
     outputs = []
-    for input_file in input_files:
-        video_path = os.path.join(opt.video_root, input_file)
-        if os.path.exists(video_path):
-            print(video_path)
+
+    video_list = glob.glob(os.path.join(opt.video_dir, '*.mp4'))
+    video_list += glob.glob(os.path.join(opt.video_dir, '*.avi'))
+    video_list.sort()
+    pbar = tqdm(video_list)
+
+    with open(os.devnull, "w") as ffmpeg_log:
+        for video in pbar:
+            video_id = video.split("/")[-1].split(".")[0]
+            pbar.set_description(video_id)
             subprocess.call('mkdir tmp', shell=True)
-            subprocess.call('ffmpeg -i {} tmp/image_%05d.jpg'.format(video_path),
-                            shell=True)
+            subprocess.call('ffmpeg -i {} tmp/image_%05d.jpg'.format(video),
+                            shell=True, stdout=ffmpeg_log, stderr=ffmpeg_log)
+            try:
+                result = classify_video('tmp', video, class_names, model, opt)
 
-            result = classify_video('tmp', input_file, class_names, model, opt)
-            outputs.append(result)
+                subprocess.call('rm -rf tmp', shell=True)
 
+                segments = result["clips"]
+                feat = np.zeros((len(segments), 2048))
+                i = 0
+                for segment in segments:
+                    feat[i] = segment["features"]
+                    i += 1
+                np.save(opt.output_dir + '/' + video_id, feat)
+            except Exception as err:
+                print(video_id, err)
+
+        if os.path.exists('tmp'):
             subprocess.call('rm -rf tmp', shell=True)
-        else:
-            print('{} does not exist'.format(input_file))
-
-    if os.path.exists('tmp'):
-        subprocess.call('rm -rf tmp', shell=True)
-
-    with open(opt.output, 'w') as f:
-        json.dump(outputs, f)
