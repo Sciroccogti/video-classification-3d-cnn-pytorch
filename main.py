@@ -60,7 +60,6 @@ if __name__ == "__main__":
             try:
                 result = classify_video('tmp', video, class_names, model, opt)
 
-                subprocess.call('rm -rf tmp', shell=True)
 
                 segments = result["clips"]
                 feat = np.zeros((len(segments), 2048))
@@ -71,6 +70,8 @@ if __name__ == "__main__":
                 np.save(opt.output_dir + '/' + video_id, feat)
             except Exception as err:
                 print(video_id, err)
+
+            subprocess.call('rm -rf tmp', shell=True)
 
         if os.path.exists('tmp'):
             subprocess.call('rm -rf tmp', shell=True)
